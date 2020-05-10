@@ -65,7 +65,8 @@ media_type['not_supported'] = 'Not Supported'
 # Errors dictionary - list of all possible errors
 errors = dict()
 errors['no_excel_found'] = "The configuration Excel document {} couldn't be opened or does not exists"
-errors['no_valid_youtube'] = "The location {} wasn't found on your computer and is not a valid youtube URL. Was supposed to bo played at {}"
+errors[
+    'no_valid_youtube'] = "The location {} wasn't found on your computer and is not a valid youtube URL. Was supposed to bo played at {}"
 errors['no_valid_datetime'] = "{} is not in a valid datetime format. Found on line number {}"
 errors['config_is_invalid'] = "Configuration data in Excel file is missing or wrong"
 errors['past_time'] = "{} was supposed to be played at {} which is in the past"
@@ -120,7 +121,7 @@ def generate_playlist_queue():
         type = get_media_type(location)
         duration = get_duration(type, location)
         if not is_time(date_time):
-            print(errors['no_valid_datetime'].format(date_time,row))
+            print(errors['no_valid_datetime'].format(date_time, row))
         elif type != media_type['not_supported'] and date_time > present_time:
             media_object = Media(date_time, title, location, duration, type)
             playlist_queue.append(media_object)
@@ -181,21 +182,21 @@ def play_media(media_object):
     try:
         MEDIA_PLAYER.set_fullscreen(True)
     except Exception as e:
-        print("exception while trying to full screen the video {} \n".format(media_location),e)
+        print("exception while trying to full screen the video {} \n".format(media_location), e)
     try:
         media = VLC_INSTANCE.media_new(media_location)
     except Exception as e:
-        print("exception while trying to media new the video {} \n".format(media_location),e)
+        print("exception while trying to media new the video {} \n".format(media_location), e)
     try:
         MEDIA_PLAYER.set_media(media)
     except Exception as e:
-        print("exception while trying to set media the video {} \n".format(media_location),e)
+        print("exception while trying to set media the video {} \n".format(media_location), e)
     try:
         MEDIA_PLAYER.play()
     except Exception as e:
-        print("exception while trying to play the video {} \n".format(media_location),e)
+        print("exception while trying to play the video {} \n".format(media_location), e)
     time.sleep(WAITING_TIME_FOR_PLAYER_OPENING)
-    print(media_object.date_time,"playing:", media_object.location)
+    print(media_object.date_time, "playing:", media_object.location)
     if not media_location == config.static_picture:
         threading.Timer(media_duration, end_of_media).start()
 
@@ -206,27 +207,36 @@ def end_of_media():
         play_media(static_picture_media)
 
 
-#Plays the next media in the queue
+# Plays the next media in the queue
 def play_next_media_in_queue(next_media):
     global playlist_queue
     if not playlist_queue:
         return
-    play_media(next_media)
-    when_to_play_next = datetime.timedelta(0).total_seconds()
-    while when_to_play_next <= datetime.timedelta(0).total_seconds():
+    if next_media:
+        play_media(next_media)
+    five_days_delta = datetime.timedelta(days=FIVE_DAYS).total_seconds()
+    zero_delta_time = datetime.timedelta(0).total_seconds()
+    five_days_ahead = datetime.datetime.now().timestamp() + five_days_delta
+    when_to_play_next = zero_delta_time
+    while when_to_play_next <= zero_delta_time:
         try:
             next_media = playlist_queue.pop()
-            if is_time(next_media.date_time):   # TODO check with sleep const (min)
+            if is_time(next_media.date_time):
                 when_to_play_next = (next_media.date_time - datetime.datetime.now()).total_seconds()
         except:
             return
-    threading.Timer(when_to_play_next, play_next_media_in_queue, [next_media]).start()
+    if next_media.date_time.timestamp() - five_days_ahead > zero_delta_time:
+        playlist_queue.append(next_media)
+        print("{} is more than 5 days ahead".format(next_media.date_time))
+        threading.Timer(five_days_delta, play_next_media_in_queue, [False]).start()
+    else:
+        threading.Timer(when_to_play_next, play_next_media_in_queue, [next_media]).start()
 
 
 # Generates static picture dummy media
 def generate_static_picture_media_object():
     global static_picture_media
-    date_time = datetime.datetime(1,2,3,4,5,6,7)
+    date_time = datetime.datetime(1, 2, 3, 4, 5, 6, 7)
     title = "static_picture"
     location = config.static_picture
     type = get_media_type(location)
