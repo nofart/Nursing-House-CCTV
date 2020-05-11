@@ -1,4 +1,4 @@
-import os, openpyxl, time, pafy, validators, datetime, moviepy.editor, threading
+import os, openpyxl, time, pafy, vimeo_dl, validators, datetime, moviepy.editor, threading
 
 ### If you added vlc folder to your PATH just ncomment this
 try:
@@ -11,6 +11,7 @@ except:
 import vlc
 
 YOUTUBE_PREFIX = 'https://www.youtube.com/'
+VIMEO_PREFIX = 'https://vimeo.com/'
 PATH_TO_EXCEL_FILE = 'PlayList.xlsx'
 VLC_INSTANCE = vlc.Instance('--avcodec-hw=none --video-on-top --no-directx-hw-yuv')
 MEDIA_PLAYER = VLC_INSTANCE.media_player_new()
@@ -33,9 +34,10 @@ class Configuration:
 
 
 class Media:
-    def __init__(self, date_time, title, location, duration, type):
+    def __init__(self, date_time, title, url, location, duration, type):
         self.date_time = date_time
         self.title = title
+        self.url = url
         self.location = location
         self.duration = duration
         self.type = type
@@ -59,6 +61,7 @@ config = Configuration(DEFAULT_VLC_PATH, DEFAULT_STATIC_PICTURE)
 # Media types dictionary
 media_type = dict()
 media_type['youtube_video'] = 'YouTube Video'
+media_type['vimeo_video'] = 'Vimeo Video'
 media_type['local_file'] = 'Local file'
 media_type['not_supported'] = 'Not Supported'
 
@@ -117,13 +120,17 @@ def generate_playlist_queue():
     for row in range(2, sheet.max_row + 1):
         date_time = sheet.cell(row, DATE_TIME_COLUMN).value
         title = sheet.cell(row, TITLE_COLUMN).value
-        location = sheet.cell(row, LOCATION_COLUMN).value
+        location = url = sheet.cell(row, LOCATION_COLUMN).value
         type = get_media_type(location)
         duration = get_duration(type, location)
         if not is_time(date_time):
             print(errors['no_valid_datetime'].format(date_time, row))
         elif type != media_type['not_supported'] and date_time > present_time:
-            media_object = Media(date_time, title, location, duration, type)
+            if type == media_type['youtube_video']:
+                location = pafy.new(location)
+            if type == media_type['vimeo_video']:
+                location = vimeo_dl.new(location)
+            media_object = Media(date_time, title, url, location, duration, type)
             playlist_queue.append(media_object)
         elif date_time < present_time:
             print(errors['past_time'].format(location, date_time))
@@ -131,6 +138,20 @@ def generate_playlist_queue():
             print(errors['no_valid_youtube'].format(location, date_time))
     playlist_queue.sort(key=lambda media_object: media_object.date_time, reverse=True)
     return True
+
+
+def str_time_to_seconds(str_time):
+    str_time_array = str_time.split(':')
+    try:
+        hours = int(str_time_array[-3])
+    except:
+        hours = 0
+    try:
+        minutes = int(str_time_array[-2])
+    except:
+        minutes = 0
+    seconds = int(str_time_array[-1])
+    return seconds + minutes * 60 + hours * 3600
 
 
 # Gets the type of the video(local/youtube) and the video location and returns the video duration
@@ -142,6 +163,8 @@ def get_duration(type, location):
             return 0
     elif type == media_type['youtube_video']:
         return pafy.new(location).length
+    elif type == media_type['vimeo_video']:
+        return str_time_to_seconds(vimeo_dl.new(location).duration)
     return 0
 
 
@@ -150,8 +173,11 @@ def get_media_type(location):
     try:
         if not location:
             return media_type['not_supported']
-        if validators.url(location) and location.find(YOUTUBE_PREFIX) == 0:
-            return media_type['youtube_video']
+        if validators.url(location):
+            if location.find(YOUTUBE_PREFIX) == 0:
+                return media_type['youtube_video']
+            if location.find(VIMEO_PREFIX) == 0:
+                return media_type['vimeo_video']
         if os.path.exists(location):
             return media_type['local_file']
         return media_type['not_supported']
@@ -163,42 +189,27 @@ def get_media_type(location):
 # Currently commented out - code for skipping to the next media if current media is of "not supported" type
 # This check is done during the queue generation
 def play_media(media_object):
-    object_media_type = media_object.type
     media_location = media_object.location
-    media_duration = media_object.duration
 
     # if object_media_type == media_type['not_supported']:
     #     print(errors['no_valid_youtube'], media_location)
     #     return
 
-    if object_media_type == media_type['youtube_video']:
+    if media_object.type == media_type['youtube_video'] or media_object.type == media_type['vimeo_video']:
         try:
-            video = pafy.new(media_location)
-            best = video.getbest()
+            best = media_location.getbest()
             media_location = best.url
         except Exception as e:
-            print("exception while trying to youtube the video {} \n".format(media_location), e)
+            print("exception while trying to youtube the video {} \n".format(media_object.url), e)
 
-    try:
-        MEDIA_PLAYER.set_fullscreen(True)
-    except Exception as e:
-        print("exception while trying to full screen the video {} \n".format(media_location), e)
-    try:
-        media = VLC_INSTANCE.media_new(media_location)
-    except Exception as e:
-        print("exception while trying to media new the video {} \n".format(media_location), e)
-    try:
-        MEDIA_PLAYER.set_media(media)
-    except Exception as e:
-        print("exception while trying to set media the video {} \n".format(media_location), e)
-    try:
-        MEDIA_PLAYER.play()
-    except Exception as e:
-        print("exception while trying to play the video {} \n".format(media_location), e)
+    MEDIA_PLAYER.set_fullscreen(True)
+    media = VLC_INSTANCE.media_new(media_location)
+    MEDIA_PLAYER.set_media(media)
+    MEDIA_PLAYER.play()
     time.sleep(WAITING_TIME_FOR_PLAYER_OPENING)
-    print(media_object.date_time, "playing:", media_object.location)
+    print(media_object.date_time, "playing:", media_object.url)
     if not media_location == config.static_picture:
-        threading.Timer(media_duration, end_of_media).start()
+        threading.Timer(media_object.duration, end_of_media).start()
 
 
 # Checks if the player currently at "end of media" state and displays the static picture if so.
@@ -238,9 +249,9 @@ def generate_static_picture_media_object():
     global static_picture_media
     date_time = datetime.datetime(1, 2, 3, 4, 5, 6, 7)
     title = "static_picture"
-    location = config.static_picture
+    location = url = config.static_picture
     type = get_media_type(location)
-    static_picture_media = Media(date_time, title, location, 0, type)
+    static_picture_media = Media(date_time, title, url, location, 0, type)
 
 
 # loads the excel file, generates configuration and playlist queue from it and generates static-picture media
